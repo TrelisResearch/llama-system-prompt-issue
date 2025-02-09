@@ -122,7 +122,7 @@
 <search>your search query</search>
 
 For example:
-User: What's the weather in Dublin?
+User: Search for the weather in Dublin?
 Assistant: Let me check that for you.
 <search>Dublin Ireland current weather</search>
 
@@ -131,7 +131,7 @@ Keep your responses concise and focused on the information needed.`;
                 // Test messages
                 const messages = [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "What's the weather in Paris?"}
+                    {"role": "user", "content": "Search for the weather in Paris?"}
                 ];
 
                 log('\nFormatting input with chat template...');
