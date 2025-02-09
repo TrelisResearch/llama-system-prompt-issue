@@ -1,0 +1,13 @@
+{
+  "name": "llama-system-prompt-issue",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Replicator for Llama 1B system prompt issue",
+  "main": "test_system_prompt.js",
+  "scripts": {
+    "test": "node test_system_prompt.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^2.12.0"
+  }
+} 

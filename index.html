@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Llama System Prompt Test</title>
+    <script type="importmap">
+    {
+        "imports": {
+            "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers/+esm"
+        }
+    }
+    </script>
+    <style>
+        #output {
+            white-space: pre-wrap;
+            font-family: monospace;
+            padding: 20px;
+            border: 1px solid #ccc;
+            margin: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        #status {
+            color: #666;
+            font-style: italic;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Llama System Prompt Test</h1>
+    <div id="status">Status: Loading transformers.js...</div>
+    <div id="output"></div>
+
+    <script type="module">
+        import { env, AutoTokenizer, AutoModelForCausalLM, TextStreamer } from '@huggingface/transformers';
+
+        // Skip local model check since we're downloading from HF Hub
+        env.allowLocalModels = false;
+
+        const output = document.getElementById('output');
+        const status = document.getElementById('status');
+
+        function log(text) {
+            output.textContent += text + '\n';
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function updateStatus(text) {
+            status.textContent = 'Status: ' + text;
+        }
+
+        class TextGenerationPipeline {
+            static model_id = "onnx-community/Llama-3.2-1B-Instruct-onnx-web-gqa";
+            static tokenizer = null;
+            static model = null;
+            static adapter = null;
+            static device = null;
+
+            static async cleanup() {
+                if (this.model) {
+                    try {
+                        await this.model.destroy();
+                        this.model = null;
+                    } catch (e) {
+                        console.error('Error cleaning up model:', e);
+                    }
+                }
+                if (this.device) {
+                    try {
+                        this.device.destroy();
+                        this.device = null;
+                    } catch (e) {
+                        console.error('Error cleaning up device:', e);
+                    }
+                }
+                this.tokenizer = null;
+                this.adapter = null;
+            }
+
+            static async getInstance(progress_callback = null) {
+                if (!this.tokenizer || !this.model) {
+                    console.log('Creating new pipeline instance...');
+                    
+                    await this.cleanup();
+                    
+                    this.adapter = await navigator.gpu?.requestAdapter();
+                    if (!this.adapter) {
+                        throw new Error('WebGPU adapter not available');
+                    }
+                    this.device = await this.adapter.requestDevice();
+                    
+                    updateStatus('Loading tokenizer...');
+                    this.tokenizer = await AutoTokenizer.from_pretrained(this.model_id, {
+                        progress_callback,
+                    });
+                    
+                    updateStatus('Loading model...');
+                    this.model = await AutoModelForCausalLM.from_pretrained(this.model_id, {
+                        dtype: "q4f16",
+                        device: "webgpu",
+                        progress_callback,
+                    });
+                }
+                return [this.tokenizer, this.model];
+            }
+        }
+
+        async function testSystemPrompt() {
+            try {
+                const [tokenizer, model] = await TextGenerationPipeline.getInstance((progress) => {
+                    if (progress.status === 'progress' && progress.loaded && progress.total) {
+                        const percent = Math.min(Math.round((progress.loaded / progress.total) * 100), 100);
+                        updateStatus(`Loading model: ${percent}%`);
+                    }
+                });
+
+                updateStatus('Running test...');
+
+                // System prompt
+                const system_prompt = `You are a helpful AI assistant that can search the web. When you need information to answer a question, use the search command like this:
+
+<search>your search query</search>
+
+For example:
+User: What's the weather in Dublin?
+Assistant: Let me check that for you.
+<search>Dublin Ireland current weather</search>
+
+Keep your responses concise and focused on the information needed.`;
+
+                // Test messages
+                const messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "What's the weather in Paris?"}
+                ];
+
+                log('\nFormatting input with chat template...');
+                log('Template:', tokenizer.chat_template);
+                
+                // Get readable format first for debugging
+                const readable_input = tokenizer.apply_chat_template(messages, {
+                    add_generation_prompt: true,
+                    return_dict: true,
+                    tokenize: false
+                });
+                log('\nFormatted input:');
+                log(readable_input);
+                
+                // Generate response
+                log('\nGenerating response...');
+                const inputs = tokenizer.apply_chat_template(messages, {
+                    add_generation_prompt: true,
+                    return_dict: true
+                });
+
+                let currentResponse = '';
+                const streamer = new TextStreamer(tokenizer, {
+                    skip_prompt: true,
+                    skip_special_tokens: true,
+                    callback_function: (token) => {
+                        currentResponse += token;
+                        // Clear and rewrite the full response
+                        output.textContent = output.textContent.split('\nGenerating response...')[0] + 
+                            '\nGenerating response...\n' + currentResponse;
+                        output.scrollTop = output.scrollHeight;
+                    }
+                });
+
+                await model.generate({
+                    ...inputs,
+                    max_new_tokens: 100,
+                    do_sample: true,
+                    temperature: 0.7,
+                    top_k: 50,
+                    top_p: 0.95,
+                    streamer,
+                });
+                
+                updateStatus('Test complete');
+
+            } catch (error) {
+                updateStatus('Error: ' + error.message);
+                console.error('Error:', error);
+            }
+        }
+
+        // Run the test
+        testSystemPrompt();
+
+        // Cleanup on page unload
+        window.addEventListener('unload', async () => {
+            await TextGenerationPipeline.cleanup();
+        });
+    </script>
+</body>
+</html> 
